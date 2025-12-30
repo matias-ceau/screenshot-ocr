@@ -4,11 +4,13 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -16,7 +18,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.screenshot.ocr.models.AiProvider
 
 class SettingsActivity : ComponentActivity() {
 
@@ -40,10 +41,11 @@ class SettingsActivity : ComponentActivity() {
         val settings = settingsManager.getSettings()
 
         var apiKey by remember { mutableStateOf(settings.apiKey) }
-        var selectedProvider by remember { mutableStateOf(settings.aiProvider) }
+        var modelName by remember { mutableStateOf(settings.modelName) }
         var overlapThreshold by remember { mutableStateOf(settings.overlapThreshold) }
         var chatDetection by remember { mutableStateOf(settings.enableChatDetection) }
         var showApiKey by remember { mutableStateOf(false) }
+        var showModelDropdown by remember { mutableStateOf(false) }
 
         Scaffold(
             topBar = {
@@ -66,32 +68,10 @@ class SettingsActivity : ComponentActivity() {
             ) {
                 // API Configuration Section
                 Text(
-                    "API Configuration",
+                    "OpenRouter Configuration",
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // AI Provider Selection
-                Text(
-                    "AI Provider",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                AiProvider.values().forEach { provider ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(provider.name)
-                        RadioButton(
-                            selected = selectedProvider == provider,
-                            onClick = { selectedProvider = provider }
-                        )
-                    }
-                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -99,7 +79,7 @@ class SettingsActivity : ComponentActivity() {
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it },
-                    label = { Text("API Key") },
+                    label = { Text("OpenRouter API Key") },
                     modifier = Modifier.fillMaxWidth(),
                     visualTransformation = if (showApiKey) {
                         VisualTransformation.None
@@ -112,13 +92,71 @@ class SettingsActivity : ComponentActivity() {
                         }
                     },
                     supportingText = {
-                        Text("Your API key for ${selectedProvider.name}")
+                        Text("Get your key at openrouter.ai/keys")
                     }
                 )
 
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Model Selection
+                Text(
+                    "Vision Model",
+                    style = MaterialTheme.typography.titleMedium
+                )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // API Key Help Text
+                // Model name input with dropdown
+                ExposedDropdownMenuBox(
+                    expanded = showModelDropdown,
+                    onExpandedChange = { showModelDropdown = it }
+                ) {
+                    OutlinedTextField(
+                        value = modelName,
+                        onValueChange = { modelName = it },
+                        label = { Text("Model name") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        trailingIcon = {
+                            Icon(
+                                Icons.Default.ArrowDropDown,
+                                "Select model",
+                                Modifier.clickable { showModelDropdown = true }
+                            )
+                        },
+                        supportingText = {
+                            Text("Enter any OpenRouter model ID or select from suggestions")
+                        }
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = showModelDropdown,
+                        onDismissRequest = { showModelDropdown = false }
+                    ) {
+                        SettingsManager.SUGGESTED_MODELS.forEach { (id, name) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                                        Text(
+                                            id,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    modelName = id
+                                    showModelDropdown = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Help Card
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -126,24 +164,28 @@ class SettingsActivity : ComponentActivity() {
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            "Get your API key:",
+                            "Recommended free vision models:",
                             style = MaterialTheme.typography.labelMedium
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        when (selectedProvider) {
-                            AiProvider.OPENAI -> Text(
-                                "OpenAI: platform.openai.com",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            AiProvider.GEMINI -> Text(
-                                "Gemini: makersuite.google.com",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            AiProvider.MISTRAL -> Text(
-                                "Mistral: console.mistral.ai",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
+                        Text(
+                            "- qwen/qwen2.5-vl-72b-instruct:free (best OCR)",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "- google/gemma-3-27b-it:free",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "- meta-llama/llama-3.2-11b-vision-instruct:free",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Browse all models: openrouter.ai/models",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
 
@@ -208,10 +250,19 @@ class SettingsActivity : ComponentActivity() {
                 // Save Button
                 Button(
                     onClick = {
+                        if (apiKey.isBlank()) {
+                            Toast.makeText(context, "Please enter an API key", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (modelName.isBlank()) {
+                            Toast.makeText(context, "Please enter a model name", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+
                         settingsManager.saveSettings(
                             com.screenshot.ocr.models.AppSettings(
-                                apiKey = apiKey,
-                                aiProvider = selectedProvider,
+                                apiKey = apiKey.trim(),
+                                modelName = modelName.trim(),
                                 overlapThreshold = overlapThreshold,
                                 enableChatDetection = chatDetection
                             )
@@ -237,7 +288,7 @@ class SettingsActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    "AI-powered screenshot stitching and OCR",
+                    "AI-powered screenshot stitching and OCR via OpenRouter",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

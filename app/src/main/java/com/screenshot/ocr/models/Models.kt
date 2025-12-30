@@ -31,7 +31,7 @@ data class OcrResult(
     val text: String,
     val isChat: Boolean = false,
     val chatMessages: List<ChatMessage> = emptyList(),
-    val provider: AiProvider
+    val model: String
 )
 
 data class ChatMessage(
@@ -41,21 +41,9 @@ data class ChatMessage(
     val lineNumber: Int = 0
 )
 
-enum class AiProvider {
-    OPENAI,
-    GEMINI,
-    MISTRAL;
-
-    companion object {
-        fun fromString(value: String): AiProvider {
-            return values().find { it.name.equals(value, ignoreCase = true) } ?: OPENAI
-        }
-    }
-}
-
 data class AppSettings(
     val apiKey: String = "",
-    val aiProvider: AiProvider = AiProvider.OPENAI,
+    val modelName: String = "qwen/qwen2.5-vl-72b-instruct:free",
     val overlapThreshold: Float = 0.8f,
     val enableChatDetection: Boolean = true
 )
@@ -63,7 +51,10 @@ data class AppSettings(
 sealed class ProcessingState {
     object Idle : ProcessingState()
     data class Stitching(val progress: Int, val total: Int) : ProcessingState()
-    object ExtractingText : ProcessingState()
+    data class Connecting(val model: String) : ProcessingState()
+    data class SendingImage(val model: String) : ProcessingState()
+    data class WaitingForResponse(val model: String) : ProcessingState()
+    data class ParsingResponse(val model: String) : ProcessingState()
     data class Success(val result: OcrResult, val stitchedImage: Bitmap) : ProcessingState()
     data class Error(val message: String) : ProcessingState()
 }

@@ -14,7 +14,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,13 +24,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.screenshot.ocr.models.AiProvider
 import com.screenshot.ocr.models.ProcessingState
-import com.screenshot.ocr.models.Screenshot
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
@@ -42,6 +42,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var imageStitcher: ImageStitcher
     private lateinit var ocrService: OcrService
     private lateinit var chatDetector: ChatDetector
+
+    private val processingStateFlow = MutableStateFlow<ProcessingState>(ProcessingState.Idle)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,7 +69,7 @@ class MainActivity : ComponentActivity() {
     fun ScreenshotOCRApp() {
         val context = LocalContext.current
         var selectedUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
-        var processingState by remember { mutableStateOf<ProcessingState>(ProcessingState.Idle) }
+        val processingState by processingStateFlow.collectAsState()
         var stitchedBitmap by remember { mutableStateOf<Bitmap?>(null) }
         var extractedText by remember { mutableStateOf("") }
         var showResults by remember { mutableStateOf(false) }
@@ -105,7 +107,9 @@ class MainActivity : ComponentActivity() {
                             onBack = {
                                 showResults = false
                                 selectedUris = emptyList()
-                                processingState = ProcessingState.Idle
+                                lifecycleScope.launch {
+                                    processingStateFlow.emit(ProcessingState.Idle)
+                                }
                             },
                             onShare = { text ->
                                 shareText(text)
@@ -120,7 +124,9 @@ class MainActivity : ComponentActivity() {
                         ErrorScreen(
                             error = (processingState as ProcessingState.Error).message,
                             onRetry = {
-                                processingState = ProcessingState.Idle
+                                lifecycleScope.launch {
+                                    processingStateFlow.emit(ProcessingState.Idle)
+                                }
                             }
                         )
                     }
@@ -139,7 +145,6 @@ class MainActivity : ComponentActivity() {
                                 lifecycleScope.launch {
                                     processImages(
                                         selectedUris,
-                                        onStateChange = { processingState = it },
                                         onSuccess = { bitmap, text ->
                                             stitchedBitmap = bitmap
                                             extractedText = text
@@ -161,6 +166,8 @@ class MainActivity : ComponentActivity() {
         onSelectImages: () -> Unit,
         onProcess: () -> Unit
     ) {
+        val settings = settingsManager.getSettings()
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -186,12 +193,22 @@ class MainActivity : ComponentActivity() {
                 style = MaterialTheme.typography.headlineSmall
             )
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Show current model
+            Text(
+                text = "Model: ${settings.modelName.split("/").lastOrNull() ?: settings.modelName}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
                 text = "Select overlapping screenshots to stitch and extract text",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -229,7 +246,9 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun ProcessingScreen(state: ProcessingState) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -237,18 +256,37 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.size(64.dp)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(32.dp))
+
+            val (title, subtitle) = when (state) {
+                is ProcessingState.Stitching ->
+                    "Stitching Images" to "Processing image ${state.progress} of ${state.total}"
+                is ProcessingState.Connecting ->
+                    "Connecting to API" to "Model: ${state.model}"
+                is ProcessingState.SendingImage ->
+                    "Uploading Image" to "Sending to ${state.model}"
+                is ProcessingState.WaitingForResponse ->
+                    "Waiting for AI Response" to "Processing with ${state.model}"
+                is ProcessingState.ParsingResponse ->
+                    "Parsing Response" to "Extracting text from response"
+                else -> "Processing..." to ""
+            }
 
             Text(
-                text = when (state) {
-                    is ProcessingState.Stitching ->
-                        "Stitching image ${state.progress} of ${state.total}..."
-                    is ProcessingState.ExtractingText ->
-                        "Extracting text with AI..."
-                    else -> "Processing..."
-                },
-                style = MaterialTheme.typography.titleMedium
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center
             )
+
+            if (subtitle.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 
@@ -364,7 +402,8 @@ class MainActivity : ComponentActivity() {
 
             Text(
                 text = error,
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -377,21 +416,20 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun processImages(
         uris: List<Uri>,
-        onStateChange: (ProcessingState) -> Unit,
         onSuccess: (Bitmap, String) -> Unit
     ) {
         try {
             val settings = settingsManager.getSettings()
 
             if (settings.apiKey.isEmpty()) {
-                onStateChange(ProcessingState.Error("Please set API key in settings"))
+                processingStateFlow.emit(ProcessingState.Error("Please set your OpenRouter API key in settings"))
                 return
             }
 
             // Load bitmaps
-            onStateChange(ProcessingState.Stitching(0, uris.size))
+            processingStateFlow.emit(ProcessingState.Stitching(0, uris.size))
             val bitmaps = uris.mapIndexed { index, uri ->
-                onStateChange(ProcessingState.Stitching(index + 1, uris.size))
+                processingStateFlow.emit(ProcessingState.Stitching(index + 1, uris.size))
                 contentResolver.openInputStream(uri)?.use {
                     BitmapFactory.decodeStream(it)
                 } ?: throw Exception("Failed to load image ${index + 1}")
@@ -400,13 +438,13 @@ class MainActivity : ComponentActivity() {
             // Stitch images
             val stitched = imageStitcher.stitchImages(bitmaps)
 
-            // Extract text with OCR
-            onStateChange(ProcessingState.ExtractingText)
+            // Extract text with OCR - pass the stateFlow for status updates
             val result = ocrService.extractText(
-                stitched.bitmap,
-                settings.apiKey,
-                settings.aiProvider,
-                settings.enableChatDetection
+                bitmap = stitched.bitmap,
+                apiKey = settings.apiKey,
+                modelName = settings.modelName,
+                enableChatDetection = settings.enableChatDetection,
+                stateFlow = processingStateFlow
             )
 
             // Format text
@@ -416,11 +454,11 @@ class MainActivity : ComponentActivity() {
                 result.text
             }
 
-            onStateChange(ProcessingState.Success(result, stitched.bitmap))
+            processingStateFlow.emit(ProcessingState.Success(result, stitched.bitmap))
             onSuccess(stitched.bitmap, formattedText)
 
         } catch (e: Exception) {
-            onStateChange(ProcessingState.Error(e.message ?: "Unknown error occurred"))
+            processingStateFlow.emit(ProcessingState.Error(e.message ?: "Unknown error occurred"))
         }
     }
 
