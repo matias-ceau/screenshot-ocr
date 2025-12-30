@@ -73,9 +73,26 @@ class OcrService(
                         content = listOf(
                             ContentPart.Text(
                                 text = """Extract all text from this image.
-                                    |Preserve the exact formatting, line breaks, and structure.
-                                    |If it's a chat conversation, maintain the speaker names, timestamps, and messages exactly as they appear.
-                                    |Output ONLY the extracted text, no explanations.""".trimMargin()
+                                    |
+                                    |CRITICAL INSTRUCTIONS:
+                                    |1. Preserve the exact formatting, line breaks, and structure
+                                    |2. If this is a chat conversation:
+                                    |   - Identify ALL conversation participants (usually 2 people)
+                                    |   - Detect which messages are LEFT-aligned vs RIGHT-aligned
+                                    |   - For LEFT-aligned messages, prefix with [LEFT] before the speaker name
+                                    |   - For RIGHT-aligned messages, prefix with [RIGHT] before the speaker name
+                                    |   - Maintain speaker names, timestamps, and messages exactly as they appear
+                                    |   - If a message quotes or replies to a previous message:
+                                    |     * Look for quoted text (often with gray background, quotes, or "Replying to" text)
+                                    |     * Include the quote with format: [QUOTE: OriginalSpeaker] quoted text [/QUOTE]
+                                    |     * Then include the actual reply message
+                                    |3. Output ONLY the extracted text with alignment markers, no explanations.
+                                    |
+                                    |Example output for a chat:
+                                    |[LEFT] Alice [10:30]: Hello!
+                                    |[RIGHT] Bob [10:31]: Hi there!
+                                    |[LEFT] Alice [10:32]: [QUOTE: Bob] Hi there! [/QUOTE]
+                                    |How are you?""".trimMargin()
                             ),
                             ContentPart.Image(
                                 imageUrl = ImageUrl(

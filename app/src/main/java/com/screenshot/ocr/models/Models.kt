@@ -38,8 +38,17 @@ data class ChatMessage(
     val speaker: String,
     val message: String,
     val timestamp: String? = null,
-    val lineNumber: Int = 0
+    val lineNumber: Int = 0,
+    val alignment: MessageAlignment = MessageAlignment.UNKNOWN,
+    val quotedSpeaker: String? = null,
+    val quotedMessage: String? = null
 )
+
+enum class MessageAlignment {
+    LEFT,    // Message aligned to the left
+    RIGHT,   // Message aligned to the right
+    UNKNOWN  // Alignment not detected
+}
 
 data class AppSettings(
     val apiKey: String = "",
