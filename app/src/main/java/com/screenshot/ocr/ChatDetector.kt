@@ -1,6 +1,7 @@
 package com.screenshot.ocr
 
 import com.screenshot.ocr.models.ChatMessage
+import com.screenshot.ocr.models.MessageAlignment
 
 /**
  * Detects and formats chat conversations from extracted text
@@ -8,7 +9,13 @@ import com.screenshot.ocr.models.ChatMessage
 class ChatDetector {
 
     private val chatPatterns = listOf(
-        // "Name: message"
+        // "[ALIGNMENT] Name: message" - with alignment marker
+        Regex("""^\[(LEFT|RIGHT)\]\s*([A-Z][a-zA-Z\s]{0,30})\s*:\s*(.+)$"""),
+        // "[ALIGNMENT] [Time] Name: message"
+        Regex("""^\[(LEFT|RIGHT)\]\s*([A-Z][a-zA-Z\s]{0,30})\s*[\[\(]([0-9:APM\s]+)[\]\)]\s*:\s*(.+)$"""),
+        // "[ALIGNMENT] Name [Time]: message"
+        Regex("""^\[(LEFT|RIGHT)\]\s*([A-Z][a-zA-Z\s]{0,30})\s*[\[\(]([0-9:APM\s]+)[\]\)]\s*:\s*(.+)$"""),
+        // "Name: message" - without alignment marker (fallback)
         Regex("""^([A-Z][a-zA-Z\s]{0,30})\s*:\s*(.+)$"""),
         // "[Time] Name: message" or "(Time) Name: message"
         Regex("""^[\[\(]([0-9:APM\s]+)[\]\)]\s*([A-Z][a-zA-Z\s]{0,30})\s*:\s*(.+)$"""),
@@ -19,6 +26,8 @@ class ChatDetector {
         // WhatsApp/Telegram: "[HH:MM] Name:" followed by message on next line
         Regex("""^[\[\(]([0-9]{1,2}:[0-9]{2})[\]\)]\s*([A-Z][a-zA-Z\s]+):?\s*$""")
     )
+
+    private val quotePattern = Regex("""\[QUOTE:\s*([^\]]+)\]\s*(.*?)\s*\[/QUOTE\]""", RegexOption.DOT_MATCHES_ALL)
 
     private val timePatterns = listOf(
         Regex("""\b([0-9]{1,2}:[0-9]{2}\s*(?:AM|PM)?)\b"""),
@@ -65,59 +74,164 @@ class ChatDetector {
 
             var matched = false
 
-            // Pattern 1: "Name: message"
+            // Pattern 0: "[ALIGNMENT] Name: message"
             chatPatterns[0].matchEntire(trimmedLine)?.let { match ->
-                val (speaker, message) = match.destructured
+                val (alignmentStr, speaker, messageContent) = match.destructured
+                val alignment = when (alignmentStr.uppercase()) {
+                    "LEFT" -> MessageAlignment.LEFT
+                    "RIGHT" -> MessageAlignment.RIGHT
+                    else -> MessageAlignment.UNKNOWN
+                }
+
+                val (quotedSpeaker, quotedMsg, actualMessage) = extractQuote(messageContent)
+
                 if (speaker.length in 1..30) {
                     currentMessage = ChatMessage(
                         speaker = speaker.trim(),
-                        message = message.trim(),
-                        lineNumber = lineNum
+                        message = actualMessage.trim(),
+                        lineNumber = lineNum,
+                        alignment = alignment,
+                        quotedSpeaker = quotedSpeaker,
+                        quotedMessage = quotedMsg
                     )
                     messages.add(currentMessage!!)
                     matched = true
                 }
             }
 
-            // Pattern 2: "[Time] Name: message"
+            // Pattern 1: "[ALIGNMENT] Name [Time]: message"
             if (!matched) {
                 chatPatterns[1].matchEntire(trimmedLine)?.let { match ->
-                    val (timestamp, speaker, message) = match.destructured
+                    val groups = match.groupValues
+                    val alignmentStr = groups.getOrNull(1) ?: ""
+                    val speaker = groups.getOrNull(2) ?: ""
+                    val timestamp = groups.getOrNull(3) ?: ""
+                    val messageContent = groups.getOrNull(4) ?: ""
+
+                    val alignment = when (alignmentStr.uppercase()) {
+                        "LEFT" -> MessageAlignment.LEFT
+                        "RIGHT" -> MessageAlignment.RIGHT
+                        else -> MessageAlignment.UNKNOWN
+                    }
+
+                    val (quotedSpeaker, quotedMsg, actualMessage) = extractQuote(messageContent)
+
                     currentMessage = ChatMessage(
                         speaker = speaker.trim(),
-                        message = message.trim(),
+                        message = actualMessage.trim(),
                         timestamp = timestamp.trim(),
-                        lineNumber = lineNum
+                        lineNumber = lineNum,
+                        alignment = alignment,
+                        quotedSpeaker = quotedSpeaker,
+                        quotedMessage = quotedMsg
                     )
                     messages.add(currentMessage!!)
                     matched = true
                 }
             }
 
-            // Pattern 3: "Name [Time]: message"
+            // Pattern 2: "[ALIGNMENT] Name [Time]: message" (alternative format)
             if (!matched) {
                 chatPatterns[2].matchEntire(trimmedLine)?.let { match ->
-                    val (speaker, timestamp, message) = match.destructured
+                    val groups = match.groupValues
+                    val alignmentStr = groups.getOrNull(1) ?: ""
+                    val speaker = groups.getOrNull(2) ?: ""
+                    val timestamp = groups.getOrNull(3) ?: ""
+                    val messageContent = groups.getOrNull(4) ?: ""
+
+                    val alignment = when (alignmentStr.uppercase()) {
+                        "LEFT" -> MessageAlignment.LEFT
+                        "RIGHT" -> MessageAlignment.RIGHT
+                        else -> MessageAlignment.UNKNOWN
+                    }
+
+                    val (quotedSpeaker, quotedMsg, actualMessage) = extractQuote(messageContent)
+
                     currentMessage = ChatMessage(
                         speaker = speaker.trim(),
-                        message = message.trim(),
+                        message = actualMessage.trim(),
                         timestamp = timestamp.trim(),
-                        lineNumber = lineNum
+                        lineNumber = lineNum,
+                        alignment = alignment,
+                        quotedSpeaker = quotedSpeaker,
+                        quotedMessage = quotedMsg
                     )
                     messages.add(currentMessage!!)
                     matched = true
                 }
             }
 
-            // Pattern 4: "HH:MM Name: message"
+            // Pattern 3: "Name: message" (fallback without alignment)
             if (!matched) {
                 chatPatterns[3].matchEntire(trimmedLine)?.let { match ->
-                    val (timestamp, speaker, message) = match.destructured
+                    val (speaker, messageContent) = match.destructured
+                    val (quotedSpeaker, quotedMsg, actualMessage) = extractQuote(messageContent)
+
+                    if (speaker.length in 1..30) {
+                        currentMessage = ChatMessage(
+                            speaker = speaker.trim(),
+                            message = actualMessage.trim(),
+                            lineNumber = lineNum,
+                            quotedSpeaker = quotedSpeaker,
+                            quotedMessage = quotedMsg
+                        )
+                        messages.add(currentMessage!!)
+                        matched = true
+                    }
+                }
+            }
+
+            // Pattern 4: "[Time] Name: message"
+            if (!matched) {
+                chatPatterns[4].matchEntire(trimmedLine)?.let { match ->
+                    val (timestamp, speaker, messageContent) = match.destructured
+                    val (quotedSpeaker, quotedMsg, actualMessage) = extractQuote(messageContent)
+
                     currentMessage = ChatMessage(
                         speaker = speaker.trim(),
-                        message = message.trim(),
+                        message = actualMessage.trim(),
                         timestamp = timestamp.trim(),
-                        lineNumber = lineNum
+                        lineNumber = lineNum,
+                        quotedSpeaker = quotedSpeaker,
+                        quotedMessage = quotedMsg
+                    )
+                    messages.add(currentMessage!!)
+                    matched = true
+                }
+            }
+
+            // Pattern 5: "Name [Time]: message"
+            if (!matched) {
+                chatPatterns[5].matchEntire(trimmedLine)?.let { match ->
+                    val (speaker, timestamp, messageContent) = match.destructured
+                    val (quotedSpeaker, quotedMsg, actualMessage) = extractQuote(messageContent)
+
+                    currentMessage = ChatMessage(
+                        speaker = speaker.trim(),
+                        message = actualMessage.trim(),
+                        timestamp = timestamp.trim(),
+                        lineNumber = lineNum,
+                        quotedSpeaker = quotedSpeaker,
+                        quotedMessage = quotedMsg
+                    )
+                    messages.add(currentMessage!!)
+                    matched = true
+                }
+            }
+
+            // Pattern 6: "HH:MM Name: message"
+            if (!matched) {
+                chatPatterns[6].matchEntire(trimmedLine)?.let { match ->
+                    val (timestamp, speaker, messageContent) = match.destructured
+                    val (quotedSpeaker, quotedMsg, actualMessage) = extractQuote(messageContent)
+
+                    currentMessage = ChatMessage(
+                        speaker = speaker.trim(),
+                        message = actualMessage.trim(),
+                        timestamp = timestamp.trim(),
+                        lineNumber = lineNum,
+                        quotedSpeaker = quotedSpeaker,
+                        quotedMessage = quotedMsg
                     )
                     messages.add(currentMessage!!)
                     matched = true
@@ -126,8 +240,8 @@ class ChatDetector {
 
             // If no pattern matched and we have a current message, it's a continuation
             if (!matched && currentMessage != null) {
-                // Check if this looks like a continuation (doesn't start with capital + colon)
-                if (!Regex("""^[A-Z][a-zA-Z\s]*:""").matches(trimmedLine)) {
+                // Check if this looks like a continuation (doesn't start with alignment marker or capital + colon)
+                if (!Regex("""^(\[(?:LEFT|RIGHT)\]\s*)?[A-Z][a-zA-Z\s]*:""").matches(trimmedLine)) {
                     currentMessage = currentMessage!!.copy(
                         message = currentMessage!!.message + "\n" + trimmedLine
                     )
@@ -140,6 +254,22 @@ class ChatDetector {
         }
 
         return messages
+    }
+
+    /**
+     * Extract quote information from a message
+     * Returns (quotedSpeaker, quotedMessage, remainingMessage)
+     */
+    private fun extractQuote(messageContent: String): Triple<String?, String?, String> {
+        val match = quotePattern.find(messageContent)
+        return if (match != null) {
+            val quotedSpeaker = match.groupValues.getOrNull(1)?.trim()
+            val quotedMessage = match.groupValues.getOrNull(2)?.trim()
+            val remainingMessage = messageContent.replace(match.value, "").trim()
+            Triple(quotedSpeaker, quotedMessage, remainingMessage)
+        } else {
+            Triple(null, null, messageContent)
+        }
     }
 
     /**
@@ -156,23 +286,64 @@ class ChatDetector {
 
         // Get conversation statistics
         val speakers = messages.groupingBy { it.speaker }.eachCount()
+        val alignmentCounts = messages.groupingBy { it.alignment }.eachCount()
+
         sb.appendLine("Participants: ${speakers.keys.joinToString(", ")}")
         sb.appendLine("Total messages: ${messages.size}")
+
+        // Show alignment distribution if detected
+        if (alignmentCounts.containsKey(MessageAlignment.LEFT) || alignmentCounts.containsKey(MessageAlignment.RIGHT)) {
+            val leftSpeakers = messages.filter { it.alignment == MessageAlignment.LEFT }
+                .map { it.speaker }.distinct()
+            val rightSpeakers = messages.filter { it.alignment == MessageAlignment.RIGHT }
+                .map { it.speaker }.distinct()
+
+            if (leftSpeakers.isNotEmpty()) {
+                sb.appendLine("Left-aligned: ${leftSpeakers.joinToString(", ")}")
+            }
+            if (rightSpeakers.isNotEmpty()) {
+                sb.appendLine("Right-aligned: ${rightSpeakers.joinToString(", ")}")
+            }
+        }
+
+        val quotedMessages = messages.count { it.quotedSpeaker != null }
+        if (quotedMessages > 0) {
+            sb.appendLine("Messages with quotes: $quotedMessages")
+        }
+
         sb.appendLine()
         sb.appendLine("=" * 60)
         sb.appendLine()
 
         for (msg in messages) {
-            // Format: [Time] Speaker:
-            val header = if (msg.timestamp != null) {
-                "[${msg.timestamp}] ${msg.speaker}:"
-            } else {
-                "${msg.speaker}:"
+            // Format alignment indicator
+            val alignmentIndicator = when (msg.alignment) {
+                MessageAlignment.LEFT -> "◄ "
+                MessageAlignment.RIGHT -> "► "
+                MessageAlignment.UNKNOWN -> ""
+            }
+
+            // Format: [Alignment] [Time] Speaker:
+            val header = buildString {
+                append(alignmentIndicator)
+                if (msg.timestamp != null) {
+                    append("[${msg.timestamp}] ")
+                }
+                append("${msg.speaker}:")
             }
 
             sb.appendLine(header)
 
-            // Indent the message
+            // If there's a quote, show it first
+            if (msg.quotedSpeaker != null && msg.quotedMessage != null) {
+                sb.appendLine("  ┌─ Quoting ${msg.quotedSpeaker}:")
+                msg.quotedMessage.lines().forEach { line ->
+                    sb.appendLine("  │ $line")
+                }
+                sb.appendLine("  └─")
+            }
+
+            // Show the actual message
             msg.message.lines().forEach { line ->
                 sb.appendLine("  $line")
             }
